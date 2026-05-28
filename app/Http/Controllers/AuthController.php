@@ -17,14 +17,14 @@ class AuthController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|string|email|max:255|unique:users',
-            'password' => 'required|string|min:8|confirmed',
+            'password' => 'required|string|min:6',
         ]);
 
         $user = User::create([
             'name' => $validated['name'],
             'email' => $validated['email'],
             'password' => Hash::make($validated['password']),
-            'role' => 'driver', // Only drivers can register
+            'role' => $request->input('role', 'driver'),
         ]);
 
         $token = $user->createToken('auth_token')->plainTextToken;
