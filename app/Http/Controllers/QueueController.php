@@ -2,6 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\QueueCreated;
+use App\Events\QueueDeleted;
+use App\Events\QueueStatusChanged;
 use App\Models\Location;
 use App\Models\Queue;
 use App\Models\QueueHistory;
@@ -54,10 +57,16 @@ class QueueController extends Controller
             'status'       => 'waiting',
             'arrived_at'   => now(),
             'notes'        => $data['notes'] ?? null,
+            'created_by'   => $request->user()?->id,
         ]);
 
+        $queue->load('vehicle.vehicleType', 'location');
+
+        // Broadcast queue created event
+        QueueCreated::dispatch($queue);
+
         return response()->json([
-            'data' => $queue->load('vehicle.vehicleType', 'location'),
+            'data' => $queue,
         ], 201);
     }
 
@@ -111,6 +120,7 @@ class QueueController extends Controller
             $queue->notes = $data['notes'];
         }
 
+        $queue->updated_by = $request->user()?->id;
         $queue->save();
 
         QueueHistory::create([
@@ -123,6 +133,16 @@ class QueueController extends Controller
             'changed_at'      => now(),
         ]);
 
-        return response()->json(['data' => $queue->load('vehicle.vehicleType', 'location')]);
+        $queue->load('vehicle.vehicleType', 'location');
+
+        // Broadcast queue status changed event
+        QueueStatusChanged::dispatch(
+            $queue,
+            $previousStatus,
+            $data['status'],
+            $data['notes'] ?? null
+        );
+
+        return response()->json(['data' => $queue]);
     }
 }

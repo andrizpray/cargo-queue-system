@@ -17,6 +17,8 @@ class Queue extends Model
         'started_at',
         'completed_at',
         'notes',
+        'created_by',
+        'updated_by',
     ];
 
     protected $casts = [
@@ -33,6 +35,16 @@ class Queue extends Model
     public function location(): BelongsTo
     {
         return $this->belongsTo(Location::class);
+    }
+
+    public function createdBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function updatedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'updated_by');
     }
 
     public function queueHistory(): HasMany

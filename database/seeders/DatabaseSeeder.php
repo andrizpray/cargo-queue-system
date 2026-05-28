@@ -14,9 +14,26 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
+        // Create sample users with different roles - using test emails
+        User::create([
+            'name' => 'Driver User',
+            'email' => 'driver@test.com',
+            'password' => bcrypt('password123'),
+            'role' => 'driver',
+        ]);
+
+        User::create([
+            'name' => 'Security User',
+            'email' => 'security@test.com',
+            'password' => bcrypt('password123'),
+            'role' => 'security',
+        ]);
+
+        User::create([
+            'name' => 'Admin User',
+            'email' => 'admin@test.com',
+            'password' => bcrypt('password123'),
+            'role' => 'admin',
         ]);
 
         // 3 Locations

@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class QueueHistory extends Model
 {
+    protected $table = 'queue_history';
+    
     protected $fillable = [
         'queue_id',
         'vehicle_id',
