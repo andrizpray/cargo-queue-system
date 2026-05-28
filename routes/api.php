@@ -1,7 +1,10 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\LocationNotificationSettingController;
+use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\QueueController;
+use App\Http\Controllers\UserController;
 use App\Http\Controllers\VehicleController;
 use Illuminate\Support\Facades\Route;
 
@@ -34,22 +37,36 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/queues', [QueueController::class, 'store'])->middleware('role:driver,admin');
     Route::get('/queues', function () {
         $user = auth()->user();
-        
+
         // Admin and security can view all queues
         if ($user->hasAnyRole(['admin', 'security'])) {
             return response()->json(['data' => \App\Models\Queue::all()]);
         }
-        
+
         // Drivers can only view their own queues
         if ($user->hasRole('driver')) {
             return response()->json(['data' => \App\Models\Queue::where('user_id', $user->id)->get()]);
         }
-        
+
         return response()->json(['data' => []], 403);
     });
-    
+
     Route::get('/queues/location/{location_id}', [QueueController::class, 'index']);
     Route::get('/queues/{id}', [QueueController::class, 'show']);
     Route::put('/queues/{id}/status', [QueueController::class, 'updateStatus'])->middleware('role:security,admin');
+
+    // User routes
+    Route::put('/users/{id}/phone', [UserController::class, 'updatePhone']);
+    Route::get('/users/{id}', [UserController::class, 'show']);
+
+    // Notification routes
+    Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::get('/notifications/stats', [NotificationController::class, 'stats']);
+    Route::get('/notifications/{id}', [NotificationController::class, 'show']);
+
+    // Location notification settings routes
+    Route::get('/locations/{locationId}/notification-settings', [LocationNotificationSettingController::class, 'show']);
+    Route::put('/locations/{locationId}/notification-settings', [LocationNotificationSettingController::class, 'update'])
+        ->middleware('role:admin');
 });
 

@@ -13,12 +13,14 @@ use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class QueueCreated implements ShouldBroadcast
+class QueueReminder implements ShouldBroadcast
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
-    public function __construct(public Queue $queue)
-    {
+    public function __construct(
+        public Queue $queue,
+        public int $minutesUntil,
+    ) {
     }
 
     public function broadcastOn(): array
@@ -31,7 +33,7 @@ class QueueCreated implements ShouldBroadcast
 
     public function broadcastAs(): string
     {
-        return 'queue.created';
+        return 'queue.reminder';
     }
 
     public function broadcastWith(): array
@@ -40,22 +42,20 @@ class QueueCreated implements ShouldBroadcast
             'id' => $this->queue->id,
             'queue_number' => $this->queue->queue_number,
             'location_id' => $this->queue->location_id,
-            'vehicle_id' => $this->queue->vehicle_id,
-            'status' => $this->queue->status,
-            'arrived_at' => $this->queue->arrived_at,
+            'minutes_until' => $this->minutesUntil,
             'vehicle' => $this->queue->vehicle,
             'location' => $this->queue->location,
         ];
     }
 
     /**
-     * Send WhatsApp notification to admins when a new queue is created
+     * Send WhatsApp reminder notification to driver
      */
     public function sendWhatsAppNotification(): void
     {
         $settings = LocationNotificationSetting::getSettingForLocation($this->queue->location_id);
         
-        if (!$settings->notify_admin_on_queue_created) {
+        if (!$settings->send_reminders) {
             return;
         }
 
@@ -65,6 +65,6 @@ class QueueCreated implements ShouldBroadcast
             return;
         }
 
-        $whatsappService->sendQueueCreatedNotification($this->queue);
+        $whatsappService->sendQueueReminderNotification($this->queue, $this->minutesUntil);
     }
 }

@@ -57,6 +57,7 @@ class QueueController extends Controller
             'status'       => 'waiting',
             'arrived_at'   => now(),
             'notes'        => $data['notes'] ?? null,
+            'user_id'      => $request->user()?->id, // Track the driver who created the queue
             'created_by'   => $request->user()?->id,
         ]);
 

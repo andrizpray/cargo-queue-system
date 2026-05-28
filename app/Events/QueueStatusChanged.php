@@ -3,6 +3,8 @@
 namespace App\Events;
 
 use App\Models\Queue;
+use App\Models\LocationNotificationSetting;
+use App\Services\WhatsAppService;
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PresenceChannel;
@@ -52,5 +54,30 @@ class QueueStatusChanged implements ShouldBroadcast
             'vehicle' => $this->queue->vehicle,
             'location' => $this->queue->location,
         ];
+    }
+
+    /**
+     * Send WhatsApp notification to driver when queue status changes
+     */
+    public function sendWhatsAppNotification(): void
+    {
+        $settings = LocationNotificationSetting::getSettingForLocation($this->queue->location_id);
+        
+        if (!$settings->notify_driver_on_status_changed) {
+            return;
+        }
+
+        $whatsappService = app(WhatsAppService::class);
+        
+        if (!$whatsappService->isEnabled()) {
+            return;
+        }
+
+        $whatsappService->sendQueueStatusChangedNotification(
+            $this->queue,
+            $this->previousStatus,
+            $this->newStatus,
+            $this->notes
+        );
     }
 }
