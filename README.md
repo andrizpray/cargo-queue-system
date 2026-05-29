@@ -5,22 +5,21 @@
 ## 📋 Overview
 
 Cargo Queue System adalah aplikasi manajemen antrian kendaraan yang dirancang untuk warehouse/pabrik dengan fitur:
-- Real-time queue tracking
-- Barcode scanning (Code128)
+- Real-time queue tracking via WebSocket (Laravel Reverb)
+- Barcode scanning (Code128) untuk identifikasi kendaraan
 - Multi-location support
-- Role-based access (Security, Admin Ekspedisi, Admin Utama)
-- Comprehensive reporting
+- Role-based access control (driver, security, admin)
+- Queue history audit trail untuk setiap perubahan status
 
 ## 🏗️ Architecture
 
 ```
-Backend: Laravel 13 + PostgreSQL/SQLite
+Backend: Laravel 13 + SQLite (PostgreSQL for prod)
+         └─ Laravel Reverb (WebSocket) port 8080
   ↓
-API REST (JSON)
+API REST (JSON) + Bearer Token Auth (Sanctum)
   ↓
-Mobile App: Flutter (iOS + Android)
-  ↓
-Dashboard Web: Vue 3 (admin panel)
+Mobile App: Flutter (Android primary, iOS compatible)
 ```
 
 ## 🚀 Quick Start
@@ -28,8 +27,8 @@ Dashboard Web: Vue 3 (admin panel)
 ### Prerequisites
 - PHP 8.2+
 - Composer
-- SQLite (or PostgreSQL)
-- Node.js 18+
+- SQLite (default) or PostgreSQL for production
+- Node.js 18+ (for Laravel Mix/assets)
 
 ### Installation
 
@@ -46,29 +45,77 @@ npm install
 cp .env.example .env
 php artisan key:generate
 
-# Run migrations
+# Run migrations (uses SQLite by default)
 php artisan migrate
 
 # Seed database with sample data
 php artisan db:seed
 
 # Start dev server
-php artisan serve
+php artisan serve --host=0.0.0.0 --port=8000
+
+# For WebSocket (real-time) - run in separate terminal
+php artisan reverb:start --port=8080
 ```
 
-Server akan berjalan di `http://localhost:8000`
+Server akan berjalan di `http://43.134.37.14:8000`
+WebSocket tersedia di `ws://43.134.37.14:8080`
+
+### Production Deployment (PostgreSQL)
+
+```bash
+# Update .env for PostgreSQL
+DB_CONNECTION=pgsql
+DB_HOST=your_postgres_host
+DB_PORT=5432
+DB_DATABASE=cargo_queue
+DB_USERNAME=postgres
+DB_PASSWORD=your_password
+
+# Run migrations
+php artisan migrate
+
+# Seed default users
+php artisan db:seed
+```
+
+## 🔐 Default Test Users
+
+Setelah seeding, login dengan:
+
+| Role    | Email              | Password    |
+|---------|--------------------|-------------|
+| driver  | driver@test.com    | password123 |
+| security| security@test.com  | password123 |
+| admin   | admin@test.com     | password123 |
 
 ## 📊 Database Schema
 
 ### Tables
 
-| Table | Purpose |
-|-------|---------|
-| `locations` | Warehouse/pabrik locations |
-| `vehicle_types` | Roll, Sheet, Roll+Sheet, Waste, Sesetan |
-| `vehicles` | Kendaraan dengan barcode Code128 |
-| `queues` | Antrian kendaraan (waiting, loading, done, cancelled) |
-| `queue_history` | Audit trail untuk setiap perubahan status |
+| Table           | Purpose                                      |
+|-----------------|----------------------------------------------|
+| `users`         | User accounts dengan role (driver/security/admin) |
+| `locations`     | Warehouse/pabrik locations                   |
+| `vehicle_types` | Roll, Sheet, Roll+Sheet, Waste, Sesetan      |
+| `vehicles`      | Kendaraan dengan barcode Code128             |
+| `queues`        | Antrian kendaraan (waiting→loading→done/cancelled) |
+| `queue_history` | Audit trail untuk setiap perubahan status    |
+
+### Schema Details
+
+**vehicles table:**
+- `vehicle_type_id` - nullable (admin edits later)
+- `location_id` - nullable
+- `plate_number` - nullable (can be empty)
+- `barcode_code128` - unique identifier
+
+**queues table:**
+- `weight_kg` (tonase) - nullable (admin fills later)
+- `cargo_description` - nullable
+- `driver_name` - optional
+- `driver_phone` - optional
+- `notes` - optional
 
 ### Relationships
 
@@ -81,8 +128,8 @@ VehicleType
   └─ hasMany Vehicles
 
 Vehicle
-  ├─ belongsTo VehicleType
-  ├─ belongsTo Location
+  ├─ belongsTo VehicleType (nullable)
+  ├─ belongsTo Location (nullable)
   ├─ hasMany Queues
   └─ hasMany QueueHistory
 
@@ -99,17 +146,56 @@ QueueHistory
 
 ## 🔌 API Endpoints
 
+### Authentication
+
+**Login**
+```bash
+POST /api/login
+Content-Type: application/json
+
+{
+  "email": "driver@test.com",
+  "password": "password123"
+}
+
+Response: 200 OK
+{
+  "data": {
+    "user": { "id": 1, "name": "Driver", "email": "driver@test.com", "role": "driver" },
+    "token": "1|abc123..."
+  }
+}
+```
+
+**Register** *(password confirmation removed)*
+```bash
+POST /api/register
+Content-Type: application/json
+
+{
+  "name": "John Doe",
+  "email": "john@example.com",
+  "password": "password123",
+  "password_confirmation": "password123"
+}
+
+Response: 201 Created
+```
+
 ### Queue Management
 
-**Create Queue**
+**Create Queue** *(plate_number OR vehicle_id, tonase optional)*
 ```bash
 POST /api/queues
+Authorization: Bearer {token}
 Content-Type: application/json
 
 {
   "location_id": 1,
-  "vehicle_type_id": 1,
   "plate_number": "B 1234 ABC",
+  "vehicle_id": null,
+  "weight_kg": null,
+  "cargo_description": null,
   "driver_name": "John Doe",
   "driver_phone": "08123456789",
   "notes": "Optional notes"
@@ -121,23 +207,12 @@ Response: 201 Created
     "id": 1,
     "queue_number": 1,
     "status": "waiting",
-    "vehicle": { ... },
-    "location": { ... }
-  }
-}
-```
-
-**Get Queue by ID**
-```bash
-GET /api/queues/{id}
-
-Response: 200 OK
-{
-  "data": {
-    "id": 1,
-    "queue_number": 1,
-    "status": "waiting",
-    "vehicle": { ... },
+    "plate_number": "B 1234 ABC",
+    "weight_kg": null,
+    "cargo_description": null,
+    "driver_name": "John Doe",
+    "driver_phone": "08123456789",
+    "vehicle": null,
     "location": { ... }
   }
 }
@@ -156,9 +231,18 @@ Response: 200 OK
 }
 ```
 
+**Get Queue by ID**
+```bash
+GET /api/queues/{id}
+
+Response: 200 OK
+{ "data": { ... } }
+```
+
 **Update Queue Status**
 ```bash
 PUT /api/queues/{id}/status
+Authorization: Bearer {token}
 Content-Type: application/json
 
 {
@@ -171,7 +255,7 @@ Response: 200 OK
   "data": {
     "id": 1,
     "status": "loading",
-    "started_at": "2026-05-28T10:00:00Z",
+    "started_at": "2026-05-29T10:00:00Z",
     ...
   }
 }
@@ -182,6 +266,7 @@ Response: 200 OK
 **Scan Barcode**
 ```bash
 POST /api/vehicles/scan
+Authorization: Bearer {token}
 Content-Type: application/json
 
 {
@@ -205,14 +290,22 @@ Response: 200 OK
 GET /api/vehicles/{barcode_code128}
 
 Response: 200 OK
-{
-  "data": {
-    "id": 1,
-    "plate_number": "B 1234 ABC",
-    "barcode_code128": "VH00000001",
-    ...
-  }
-}
+{ "data": { ... } }
+```
+
+**Get Vehicles by Location**
+```bash
+GET /api/vehicles/location/{location_id}
+
+Response: 200 OK
+{ "data": [ ... ] }
+```
+
+### Location & Vehicle Types
+
+```bash
+GET /api/locations
+GET /api/vehicle-types
 ```
 
 ## 📱 Queue Status Flow
@@ -224,31 +317,36 @@ waiting → loading → done
 
 **Status Timestamps:**
 - `created_at` - Queue dibuat
-- `arrived_at` - Kendaraan tiba
+- `arrived_at` - Kendaraan tiba (set when status changes to anything except waiting)
 - `started_at` - Mulai loading (status → loading)
 - `completed_at` - Selesai/dibatalkan (status → done/cancelled)
 
 ## 🔐 Authentication & Authorization
 
 **Roles:**
-- **Security** - Check-in kendaraan, scan barcode
-- **Admin Ekspedisi** - Panggil antrian, update status
-- **Admin Utama** - Dashboard overview, reports, manage staff
+- **driver** - Create queue, view own queues, update profile
+- **security** - Scan barcode, check-in vehicles, update queue status
+- **admin** - Full access: manage queues, vehicles, locations, view all data
 
-*(Authentication akan diimplementasikan di fase berikutnya)*
+**Token-based Auth (Laravel Sanctum):**
+```bash
+# Include token in all authenticated requests
+Authorization: Bearer {token}
+```
 
 ## 📈 Reports
 
-Fitur reporting mencakup:
+⚠️ **Coming Soon** - Reports module not yet implemented
+
+Planned features:
 - Wait time per kendaraan
 - Throughput per staff
 - Peak hours analysis
 - Vehicle type breakdown
-- Status distribution (parkir, masuk, muat, selesai, cancel)
 
 ## 🐛 Known Issues & Fixes
 
-### Fixed Issues (v1.0)
+### Fixed Issues (v1.1)
 
 ✅ **Bug #1** - Missing `barcode_code128` in Vehicle $fillable
 - Fixed: Added to $fillable array
@@ -265,6 +363,15 @@ Fitur reporting mencakup:
 ✅ **Bug #5** - Missing location_id validation in QueueController::index()
 - Fixed: Added Location::findOrFail()
 
+✅ **Bug #6** - Password confirmation required on register
+- Fixed: Removed password_confirmation requirement
+
+✅ **Bug #7** - Tonase (weight_kg) required on queue creation
+- Fixed: weight_kg and cargo_description now nullable
+
+✅ **Bug #8** - plate_number required on queue creation
+- Fixed: plate_number optional, vehicle_id can be used as fallback
+
 ## 🧪 Testing
 
 ```bash
@@ -275,14 +382,16 @@ php artisan test
 php artisan test tests/Feature/QueueControllerTest.php
 
 # Test API endpoints with curl
-curl -X POST http://localhost:8000/api/queues \
+curl -X POST http://43.134.37.14:8000/api/queues \
   -H "Content-Type: application/json" \
-  -d '{"location_id":1,"vehicle_type_id":1,"plate_number":"B 1234 ABC"}'
+  -H "Authorization: Bearer {token}" \
+  -d '{"location_id":1,"plate_number":"B 1234 ABC"}'
 ```
 
 ## 📦 Sample Data
 
 Database seeded dengan:
+- **3 Users:** driver@test.com, security@test.com, admin@test.com
 - **3 Locations:** Warehouse A, B, C
 - **5 Vehicle Types:** Roll, Sheet, Roll+Sheet, Waste, Sesetan
 - **10 Vehicles:** VH00000001 - VH00000010 (dengan barcode Code128)
@@ -290,27 +399,45 @@ Database seeded dengan:
 
 ## 🚢 Deployment
 
-### Local Server (Pabrik)
+### Server Requirements
+- PHP 8.2+ with extensions: mbstring, xml, json, PDO
+- Composer 2+
+- SQLite or PostgreSQL
+- Node.js 18+ (for asset compilation)
+
+### Production Setup
 
 ```bash
-# Setup on Ubuntu 24.04
-sudo apt update && sudo apt install -y php8.2 php8.2-sqlite php8.2-curl composer
-
 # Clone & setup
 git clone git@github.com:andrizpray/cargo-queue-system.git
 cd cargo-queue-system
-composer install
-php artisan migrate --seed
+composer install --optimize-autoloader --no-dev
 
-# Run with Supervisor or systemd
-php artisan serve --host=0.0.0.0 --port=8000
+# Environment
+cp .env.production .env
+php artisan key:encrypt
+php artisan migrate --force
+php artisan db:seed --force
+
+# Start services
+php artisan serve --host=0.0.0.0 --port=8000 &
+php artisan reverb:start --port=8080 &
 ```
 
-### Cloud Server (Testing)
+### Using Supervisor (recommended for production)
 
-```bash
-# Deploy to DigitalOcean/AWS/etc
-# Use Laravel Forge or manual setup
+```ini
+[program:cargo-queue]
+command=php /path/to/cargo-queue-system/artisan serve --host=0.0.0.0 --port=8000
+directory=/path/to/cargo-queue-system
+autostart=true
+autorestart=true
+
+[program:cargo-queue-reverb]
+command=php /path/to/cargo-queue-system/artisan reverb:start --port=8080
+directory=/path/to/cargo-queue-system
+autostart=true
+autorestart=true
 ```
 
 ## 📝 Environment Variables
@@ -319,36 +446,46 @@ php artisan serve --host=0.0.0.0 --port=8000
 APP_NAME="Cargo Queue System"
 APP_ENV=local
 APP_DEBUG=true
-APP_URL=http://localhost:8000
+APP_URL=http://43.134.37.14:8000
 
 DB_CONNECTION=sqlite
 DB_DATABASE=database/database.sqlite
 
-# Or PostgreSQL
-DB_CONNECTION=pgsql
-DB_HOST=localhost
-DB_PORT=5432
-DB_DATABASE=cargo_queue
-DB_USERNAME=postgres
-DB_PASSWORD=secret
+# For Production (PostgreSQL)
+# DB_CONNECTION=pgsql
+# DB_HOST=localhost
+# DB_PORT=5432
+# DB_DATABASE=cargo_queue
+# DB_USERNAME=postgres
+# DB_PASSWORD=secret
+
+BROADCAST_CONNECTION=reverb
+REVERB_APP_ID=app_id
+REVERB_APP_KEY=app_key
+REVERB_APP_SECRET=app_secret
+REVERB_HOST=43.134.37.14
+REVERB_PORT=8080
 ```
 
 ## 🔄 Next Steps
 
-- [ ] Flutter mobile app (barcode scanner + queue tracking)
+- [x] Laravel backend with SQLite
+- [x] Authentication (Sanctum)
+- [x] Queue CRUD with status flow
+- [x] Barcode Code128 scanning
+- [x] Queue history audit trail
+- [x] Real-time updates (Reverb WebSocket)
 - [ ] Vue 3 admin dashboard
-- [ ] Real-time updates (Redis + WebSocket)
 - [ ] WhatsApp notifications
-- [ ] Authentication & authorization
 - [ ] Rate limiting & API security
 - [ ] Comprehensive test suite
-- [ ] Production deployment
+- [ ] Production deployment with SSL
 
 ## 📚 Documentation
 
-- [API Documentation](docs/API.md) *(coming soon)*
-- [Flutter Integration Guide](docs/FLUTTER.md) *(coming soon)*
-- [Deployment Guide](docs/DEPLOYMENT.md) *(coming soon)*
+- [API Documentation](docs/API.md) ⚠️ Coming soon
+- [Flutter Integration Guide](docs/FLUTTER.md) ⚠️ Coming soon
+- [Deployment Guide](docs/DEPLOYMENT.md) ⚠️ Coming soon
 
 ## 🤝 Contributing
 
@@ -373,5 +510,5 @@ For issues, questions, or suggestions:
 
 ---
 
-**Last Updated:** 2026-05-28
-**Version:** 1.0.0 (Spike Complete)
+**Last Updated:** 2026-05-29
+**Version:** 1.1.0
