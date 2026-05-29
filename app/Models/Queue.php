@@ -17,6 +17,8 @@ class Queue extends Model
         'started_at',
         'completed_at',
         'notes',
+        'cargo_description',
+        'weight_kg',
         'created_by',
         'updated_by',
     ];
@@ -25,6 +27,7 @@ class Queue extends Model
         'arrived_at' => 'datetime',
         'started_at' => 'datetime',
         'completed_at' => 'datetime',
+        'weight_kg' => 'decimal:2',
     ];
 
     public function vehicle(): BelongsTo

@@ -18,47 +18,67 @@ class QueueController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'vehicle_type_id' => 'required|integer|exists:vehicle_types,id',
-            'location_id'     => 'required|integer|exists:locations,id',
-            'plate_number'    => 'required|string|max:20',
-            'driver_name'     => 'nullable|string|max:255',
-            'driver_phone'    => 'nullable|string|max:20',
-            'notes'           => 'nullable|string',
+            'vehicle_id'         => 'nullable|integer|exists:vehicles,id',
+            'vehicle_type_id'    => 'nullable|integer|exists:vehicle_types,id',
+            'location_id'       => 'nullable|integer|exists:locations,id',
+            'plate_number'      => 'nullable|string|max:20',
+            'driver_name'       => 'nullable|string|max:255',
+            'driver_phone'      => 'nullable|string|max:20',
+            'cargo_description' => 'nullable|string|max:255',
+            'weight_kg'         => 'nullable|numeric|min:0',
+            'notes'             => 'nullable|string',
         ]);
 
-        $vehicle = Vehicle::firstOrCreate(
-            ['plate_number' => $data['plate_number']],
-            [
-                'vehicle_type_id' => $data['vehicle_type_id'],
-                'location_id'     => $data['location_id'],
-                'driver_name'     => $data['driver_name'] ?? null,
-                'driver_phone'    => $data['driver_phone'] ?? null,
-            ]
-        );
+        // Default location_id to 1 if not provided (for backward compatibility)
+        $locationId = $data['location_id'] ?? 1;
+
+        // Determine vehicle - priority: vehicle_id > plate_number > generate placeholder
+        if (!empty($data['vehicle_id'])) {
+            // Use existing vehicle by ID
+            $vehicle = Vehicle::findOrFail($data['vehicle_id']);
+        } elseif (!empty($data['plate_number'])) {
+            // Create or find vehicle by plate number
+            $vehicle = Vehicle::firstOrCreate(
+                ['plate_number' => $data['plate_number']],
+                [
+                    'vehicle_type_id' => $data['vehicle_type_id'] ?? null,
+                    'location_id'     => $locationId,
+                    'driver_name'     => $data['driver_name'] ?? null,
+                    'driver_phone'    => $data['driver_phone'] ?? null,
+                ]
+            );
+        } else {
+            // No vehicle info - require at least plate_number or vehicle_id
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'plate_number' => ['Plate number or vehicle ID is required.'],
+            ]);
+        }
 
         if (
-            $vehicle->vehicle_type_id !== $data['vehicle_type_id'] ||
-            $vehicle->location_id !== $data['location_id']
+            isset($data['vehicle_type_id']) &&
+            ($vehicle->vehicle_type_id !== $data['vehicle_type_id'] || $vehicle->location_id !== $locationId)
         ) {
             $vehicle->update([
-                'vehicle_type_id' => $data['vehicle_type_id'],
-                'location_id'     => $data['location_id'],
+                'vehicle_type_id' => $data['vehicle_type_id'] ?? $vehicle->vehicle_type_id,
+                'location_id'     => $locationId,
                 'driver_name'     => $data['driver_name'] ?? $vehicle->driver_name,
                 'driver_phone'    => $data['driver_phone'] ?? $vehicle->driver_phone,
             ]);
         }
 
-        $queueNumber = Queue::where('location_id', $data['location_id'])->max('queue_number') + 1;
+        $queueNumber = Queue::where('location_id', $locationId)->max('queue_number') + 1;
 
         $queue = Queue::create([
-            'vehicle_id'   => $vehicle->id,
-            'location_id'  => $data['location_id'],
-            'queue_number' => $queueNumber,
-            'status'       => 'waiting',
-            'arrived_at'   => now(),
-            'notes'        => $data['notes'] ?? null,
-            'user_id'      => $request->user()?->id, // Track the driver who created the queue
-            'created_by'   => $request->user()?->id,
+            'vehicle_id'         => $vehicle->id,
+            'location_id'        => $locationId,
+            'queue_number'       => $queueNumber,
+            'status'             => 'waiting',
+            'arrived_at'         => now(),
+            'notes'              => $data['notes'] ?? null,
+            'cargo_description'  => $data['cargo_description'] ?? null,
+            'weight_kg'          => $data['weight_kg'] ?? null,
+            'user_id'            => $request->user()?->id, // Track the driver who created the queue
+            'created_by'         => $request->user()?->id,
         ]);
 
         $queue->load('vehicle.vehicleType', 'location');
